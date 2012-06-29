@@ -1,0 +1,941 @@
+// -*- mode: c++ -*-
+/*
+
+  This file is part of BITS++ -  C++ Banca d'Italia Time Series project
+
+  Copyright (c) 2005-2012 Banca d'Italia - Area Ricerca Economica e
+                          Relazioni Internazionali
+
+  Author: Emmanuele Somma (emmanuele_DOT_somma_AT_bancaditalia_DOT_it)
+          Area Ricerca Economica e Relazioni Internazionali 
+          Banca d'Italia
+		  
+  Any parts of this program derived from this project, or contributed
+  by third-party developers are copyrighted by their respective
+  authors.
+
+  This program is free software; you can redistribute it and/or modify
+  it under the terms of the GNU General Public License as published by
+  the Free Software Foundation; either version 2 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU General Public License for more details.
+
+  You should have received a copy of the GNU General Public License
+  along with this program; if not, write to the Free Software
+  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301, USA
+
+*/
+
+// ostream& operator<<(ostream& o, vector<string>& v)
+// {
+//   o << "V[" << v.size() << "]=" ;
+//   for(vector<string>::iterator i=v.begin();i!=v.end();) 
+// 	{ 
+// 	  o << (*i) ; 
+// 	  ++i;
+// 	  if ( i != v.end() ) 
+// 		o << "," ; 
+// 	  else 
+// 		o <<  ""; 
+// 	}
+//   return o;
+// }
+
+# include <typeinfo>
+
+template<class M, class T> inline tsmat<M,T>::tsmat()
+  : _freq(unknown), start(_start), freq(_freq) 
+{ 
+}
+
+template<class M, class T> inline tsmat<M,T>::~tsmat()
+{ 
+}
+
+template<class M, class T> inline tsmat<M,T>::tsmat(int y, int p, frequency f)
+  : _start(y,p,f), _freq(f), start(_start), freq(_freq) 
+{ 
+}
+
+template<class M, class T> inline tsmat<M,T>::tsmat(int y, int p, frequency f, M& Data)
+  : data(Data), _start(y,p,f), _freq(f), start(_start), freq(_freq) 
+{ 
+  typename M::iterator i=Data.begin();
+  typename M::iterator e=Data.end();
+  int j=0;
+  while (i!=e) 
+	{
+	  series.push_back(string("TS")+lexical_cast<string>(j));
+	  i++;
+	  j++;
+	}
+}
+
+
+template<class M, class T> inline tsmat<M,T>::tsmat(int y, int p, frequency f, M& Data, vector<string> names)
+  : data(Data), _start(y,p,f), _freq(f), start(_start), freq(_freq)
+{
+  //cerr << "NAMES=" << names << endl;
+  //  copy(names.begin(),names.end(),series.end());
+  series = names;
+  //cerr << "SERIES=" << series << endl;
+}
+
+template<class M, class T> inline tsmat<M,T>::tsmat(int y, int p, frequency f, M& Data, vector<string> names, vector<double>& releases)
+  : data(Data), _start(y,p,f), _freq(f), start(_start), freq(_freq)
+{
+  int n=0;
+  series=names;
+  _start.setFreq(_freq);
+  for(vector<double>::iterator i=releases.begin();i!=releases.end();++i,++n)
+	  {
+		double d = (*i);
+		meta(names[n],string("release"),d);
+	  }
+}
+
+template<class M, class T> inline tsmat<M,T>::tsmat(tsidx _Start, frequency f) 
+  : _start(_Start,f), _freq(f), start(_start), freq(_freq) 
+{ 
+}
+
+template<class M, class T> inline tsmat<M,T>::tsmat(tsidx _Start) 
+  : _start(_Start), _freq(_Start.freq), start(_start), freq(_freq) 
+{ 
+}
+
+template<class M, class T> 
+inline 
+tsmat<M,T>::tsmat(tsidx _Start, frequency Freq,
+				  M& Data, vector<string> names) 
+  : data(Data), _start(_Start), _freq(Freq), series(names), start(_start), freq(_freq) 
+{
+}
+
+template<class M, class T> 
+inline 
+tsmat<M,T>::tsmat(tsidx _Start, frequency Freq, M& Data) 
+  : data(Data), _start(_Start), _freq(Freq), start(_start), freq(_freq) 
+{
+  typename M::iterator i=Data.begin();
+  typename M::iterator e=Data.end();
+  int j=0;
+  while (i!=e) 
+	{
+	  series.push_back(string("TS")+lexical_cast<string>(j));
+	  i++;
+	  j++;
+	}
+}
+
+template<class M, class T> 
+inline 
+tsmat<M,T>::tsmat(tsidx _Start, frequency Freq,
+				  M& Data, vector<string> names, vector<double>& releases) 
+  : data(Data), _start(_Start), _freq(Freq), start(_start), freq(_freq) 
+{
+  _start.setFreq(Freq);
+  series=names;
+  int n=0;
+  for(vector<double>::iterator i=releases.begin();i!=releases.end();++i,++n)
+	  {
+		double d = (*i);
+		meta(n,"release",d);
+	  }
+}
+
+template<class M, class T> 
+inline 
+boost::any tsmat<M,T>::meta(string name, string key, any value) 
+{
+  LOG_TRACE(logger,"meta::putting on " << name << "[" << key << "]" );
+  names_t::iterator n=find(series.begin(),series.end(),name);
+  if (n==series.end())
+	throw std::out_of_range("no name in tseries") ;
+  unsigned int pos = n-series.begin();
+  return meta(pos,key,value);
+}
+
+template<class M, class T> 
+inline 
+boost::any tsmat<M,T>::meta(unsigned int pos, string key, any value)
+{
+  LOG_TRACE(logger,"meta::putting on " << pos << "[" << key << "]" );
+
+  if (pos>=series.size())
+	throw std::out_of_range("pos out of range");
+  
+  if (metadata.size() <pos) ;
+	{
+	  LOG_TRACE(logger,"meta::resizing" );
+	  metadata.resize(pos+1);
+	  LOG_TRACE(logger,"meta::resizing::now has size " << metadata.size() );
+	}
+  metadata_val_t& m=metadata[pos];
+  //  if (m==metadata.end()) throw no_element();
+  LOG_TRACE(logger,"meta::took m" );
+
+  metadata_val_t::iterator j=m.find(key);
+  LOG_TRACE(logger,"meta::took m" );
+  if (j!=m.end())
+	{
+	  LOG_TRACE(logger,"meta " << key << " exists");
+	  boost::any old=j->second;
+	  j->second=value;
+	  return old;
+	}
+  LOG_TRACE(logger, "meta " << key << " doesn't exists");
+  m[key]=value;
+  j=m.find(key);
+  if (j!=m.end())
+	{LOG_TRACE(logger,"meta " << key << " exists");}
+  else
+	{LOG_TRACE(logger, "meta " << key << " doesn't exists");}
+  return any(0);
+}
+
+template<class M, class T> 
+inline 
+boost::any tsmat<M,T>::meta(const string name, const string key) const
+{
+  names_t::const_iterator n=find(series.begin(),series.end(),name);
+  if (n==series.end())    
+	{
+	  //LOG_ERROR(logger,"no name in series");
+	  throw std::out_of_range("no name in series");
+	}
+  unsigned int pos = n-series.begin();
+  return meta(pos,key);
+}
+
+template<class M, class T> 
+inline 
+boost::any tsmat<M,T>::meta(unsigned int pos, string key) const
+{
+  if (pos>=metadata.size())
+	throw std::out_of_range("pos out of range");
+  metadata_val_t m=metadata[pos];
+  metadata_val_t::const_iterator i=m.find(key);
+  if (i==m.end())
+	throw no_element();
+  //  cerr << "taking meta " << pos << "[" << key << "]=" << (*i).second.type().name() << endl;
+  return (*i).second;
+}
+
+template<class M, class T> 
+inline
+string tsmat<M,T>::name(unsigned int n, string name)
+{ 
+  // cout << "inserting name " << name << " on " << n << " size " << series.size() << endl;
+  if ((series.size())< (n+1))
+	for(unsigned int i=series.size();i<(n+1);i++) {
+	  series.push_back("<EMPTY>");
+	  // cout << "inserted in " << series.size()<< endl;
+	}
+  string old=series[n];
+  series[n]=name;
+  return old;
+}
+
+template<class M, class T> 
+inline
+string tsmat<M,T>::name(unsigned int n) const
+{
+  static string empty("<EMPTY>");
+  if (n>=series.size()) throw no_element();
+  // TODO: Change the behaviour : should give back an exception if requested 
+  // name is outside the bounds (changed)
+  return series[n];
+}
+
+template<class M, class T> inline tsmat<M,T>::tsmat(const tsmat<M,T>& t)
+  : start(_start), freq(_freq) 
+{
+ _start = t.start;
+ _freq = t.freq;
+ 
+ metadata.clear();
+ metadata = t.metadata;
+
+ series.clear();
+ series=t.series;
+
+ data.clear();
+ data = t.data;
+}
+
+template<class M, class T>
+inline
+tsmat<M,T>&  tsmat<M,T>::operator =(const tsmat<M,T>& t )
+{
+ _start = t.start;
+ _freq  = t.freq;
+
+ metadata.clear();
+ metadata = t.metadata;
+
+ series.clear();
+ series=t.series;
+
+ data.clear();
+ data = t.data;
+
+ return *this;
+}
+
+template<class M, class T>
+inline
+tsmat<M,T>&  tsmat<M,T>::operator =(const double& t )
+{
+  // cerr << "tsmat operator=" << t << endl;
+  data = t;
+  return *this;
+}
+
+template<class M, class T>
+inline 
+ostream& operator << (ostream& o, const tsmat<M,T>& t)
+{
+  unsigned int nseries=t.size().first;
+
+  if (nseries==0)
+	{
+	  // cerr << "NULL TSERIES" << endl;
+	  return o;
+	}
+
+  int nobs=t.size().second;
+
+  o << "Timeseries(" << t.start 
+	<< " - freq " << t.freq 
+	<< " - nseries: " << nseries 
+	<< " (" << nobs << " obs)" << endl ;
+
+  if (nobs==0)
+    return o;
+
+  // o << "NAMES=" << t.series.size() << endl;
+  o << setw(5) << " " << " " << setw(11) << " " << " : " ;
+  for(unsigned int s=0; s<nseries; s++) {	
+	if ( t.series.size() > s ) 
+		o << setw(12) << right << t.series[s] << " " ;
+	else
+		o << setw(12) << right << s << " " ;
+  }
+  o << endl;
+  try 
+	{
+	  double rel = any_cast< double >( t.meta(0,"release") );
+	  rel = 0.0; // 
+	  for(unsigned int s=0; s<nseries; s++) {
+		double rel = any_cast< double >( t.meta(s,"release") );	
+		o << setw(12) << right << rel << " " ;
+	  }
+	  o << endl;
+	}
+  catch ( no_element e )
+	{
+	  //LOG_WARN(logger,"NO RELEASE VALUE");
+	}
+
+	  
+  for( int i=0; i<nobs; i++) {
+	o << setw(5) << i << " " << (t.start+i) << " : " ;
+	for(unsigned int s=0; s<nseries; s++) {
+	  o << setw(12) << right << t.data[s][i] << " " ;
+	}
+	o << endl ;
+  }
+
+  return o;
+}
+
+template <class M, class T> bool tsmat<M,T>::starts_before(const tsmat<M,T>& t)
+{ return start<t.start; }
+
+template <class M, class T> inline bool tsmat<M,T>::operator   <(const tsmat<M,T>& t)
+{
+  if ( freq == t.freq and start == t.start and data < t.data ) return true;
+  else return false; 
+}
+
+template <class M, class T> inline bool tsmat<M,T>::operator  ==(const tsmat<M,T>& t)
+{
+  if ( freq == t.freq and start == t.start and data == t.data ) return true;
+  else return false;
+}
+
+template<class T> inline void look(const T& t) 
+{ cout << t << endl;  }
+
+template<class C, class Op>
+inline C xplus(const C& m, const C& n)
+{
+   C p(m);
+   transform(n.begin(), n.end(), p.begin(), p.begin(), Op());
+   return p;
+}
+
+inline
+double nx(double d) { return 0; }
+
+template <class M,class T> 
+inline 
+tsmat<M,T>::operator T(void) const
+{
+  if ( data.size() == 1 and data[0].size() == 1)
+	return data[0][0];
+  throw size_mismatch();
+}
+
+template <class M,class T> 
+inline 
+tsmat<M,T>  tsmat<M,T>::extract(const tsidx& s, const tsidx_distance& dist) const
+{
+  tsmat<M,T> t(start,freq);
+  extract(t,s,dist);
+  t.series=series;
+  t.metadata=metadata;
+  return t;
+}
+
+template <class M,class T> 
+inline 
+tsmat<M,T>& tsmat<M,T>::shrink() 
+{
+  unsigned int i=0;
+  unsigned int j=0;
+  vector<unsigned int> upper_nan;
+  vector<unsigned int> lower_nan;
+
+  for(i=0;i<data.size();i++)
+	{
+	  unsigned int n=0;
+	  for(j=0;j<static_cast<unsigned int>(data.nobs());j++)
+		{
+		  if (isnan(data[i][j]))
+			{
+			  if (j>n)
+				n=j; 
+			}
+		  else
+			{
+			  upper_nan.push_back(n);
+			  break;		
+			}
+		}
+	}
+  int b = *min_element(upper_nan.begin(),upper_nan.end());
+  LOG_TRACE(logger,"upper_nan="<<b);
+
+  for(i=0;i<data.size();i++)
+	{
+	  unsigned int n=data.nobs()+1;
+	  for(j=data.nobs();j>0;j--)
+		{
+		  if (isnan(data[i][j-1]))
+			{
+			  if (j<n)
+				n=j; 
+			  LOG_TRACE(logger,"J="<<j<<" n="<<n);
+			}
+		  else
+			{
+			  lower_nan.push_back(n);
+			  break;		
+			}
+		}
+	}
+  int e = *max_element(lower_nan.begin(),lower_nan.end());
+  LOG_TRACE(logger,"lower_nan="<<e);
+  data.reduce(b,e-1);
+  _start += b;
+
+  return *this;
+}
+
+template <class M,class T> 
+inline 
+T tsmat<M,T>::value(const tsidx where, unsigned int which) const
+{
+  long n = -where.distance_from(start);
+
+  LOG_TRACE(logger,"value["<<where<<"("<<n<<")"<<","<<which<<"]");
+  // cerr << data << endl;
+  //  LOG_TRACE(logger," data["<<end()<<"("<<data.nobs()<<")"<<","<<data.size()<<"]");
+
+  if (which>=data.size())  throw size_mismatch();
+  if (n>=data.nobs()) throw size_mismatch();
+
+  return data[which][n];
+}
+
+
+template <class M,class T> 
+inline 
+tsmat<M,T> tsmat<M,T>::operator()(const tsidx start, const tsidx end, const vector<unsigned int> which) const
+{
+  tseries t(start);
+  extract(t,start,end-start);
+  return t;
+}
+
+template <class M,class T> 
+inline 
+tsmat<M,T> tsmat<M,T>::operator()(const tsidx start, const tsidx end, const unsigned int which) const
+{}
+template <class M,class T> 
+inline 
+tsmat<M,T> tsmat<M,T>::operator()(const tsidx start, const tsidx_distance len, const vector<unsigned int> which) const
+{}
+template <class M,class T> 
+inline 
+tsmat<M,T> tsmat<M,T>::operator()(const tsidx start, const tsidx_distance len, const unsigned int which) const
+{}
+template <class M,class T> 
+inline 
+tsmat<M,T> tsmat<M,T>::operator()(const tsidx start, const vector<unsigned int> which) const
+{}
+
+template <class M,class T> 
+inline 
+tsmat<M,T> tsmat<M,T>::operator()(const tsidx start, const unsigned int which) const 
+{
+  if (which>=metadata.size())
+	throw std::out_of_range("");
+
+  LOG_TRACE(logger, "operator()" );
+  tseries t(start,freq);
+  extract(t,start,tsidx_distance(0,1));
+  t.series=series;
+  t.metadata=metadata;
+  t.data = t.data(which);
+  string name = series[which];
+  LOG_TRACE(logger,  name );
+  t.series.clear();
+  t.series.push_back(name);
+  t.metadata.clear();  
+  metadata_val_t& i = metadata[which];
+  for( metadata_val_t::iterator j=i.begin(); j!=i.end();j++)
+	{
+	  t.meta(which,j->first,j->second);
+	}
+  return t;
+}
+
+template <class M,class T> 
+inline 
+tsmat<M,T> tsmat<M,T>::operator()(const unsigned int which) const 
+{
+  LOG_TRACE(logger,"operator() : " << which );
+
+  tseries t(start);
+  t.data = data(which);
+  t.series.push_back(series[which]);
+  return t;
+}
+
+template <class M,class T> 
+inline 
+tsmat<M,T> tsmat<M,T>::operator[](const string which) const 
+{
+  LOG_TRACE(logger,"operator[] : " << which );
+  vector<string>::const_iterator i = series.begin();
+  vector<string>::const_iterator e = series.end();
+  unsigned int w = 0;
+  while ( (*i)!=which and i++!=e ) w++;
+  tseries t = (*this)(w);
+  return t;
+}
+
+template <class M,class T> 
+inline 
+bool tsmat<M,T>::has_name(const string which) const 
+{
+  // cerr << "HAS " << which << "?" << endl; // find? 
+  return find(series.begin(),series.end(), which)!=series.end();
+}
+
+template <class M,class T>
+inline 
+tsmat<M,T>&  tsmat<M,T>::fill(const T& v)
+{
+  data.fill(v);
+}
+
+template <class M,class T>
+inline 
+tsmat<M,T>&  tsmat<M,T>::merge(const tsmat<M,T>& t)
+{
+  // cerr << "merging [" << start << "->" << end() << "] to [" << t.start << "->" << t.end() << "]" << endl;
+  // cerr << "         " << (t.start - start).units(freq) << "->" << ((end()-start) -(end()-t.end())).units(freq) << endl;
+
+  // Not overlapping before
+  if ( freq != t.freq )
+	throw frequency_mismatch(); 
+
+  if (t.end() < start) 
+	{
+	  prepend(t);
+	  return *this;
+	}
+
+  if (end() < t.start)
+	{
+	  append(t);
+	  return *this;
+	}
+
+  // merge overlapping values if this is nan
+  //cerr << "data.merge(" << 	(t.start - start).units(freq) - 1 << "->" << 
+  //			 ( (end()-start)  - 
+  //			   (end()-t.end())).units(freq) - 1 << endl;
+
+  data.merge(t.data,
+			 (t.start - start).units(freq) - 1,
+			 ( (end()-start)  - 
+			   (end()-t.end())).units(freq) - 1);
+
+  return *this;
+}
+
+template <class M,class T> template<class Functional> 
+inline 
+tsmat<M,T>&  tsmat<M,T>::join(const tsmat<M,T>& t, const Functional& f)
+{
+  LOG_TRACE(logger, "functional joining [" << start << "->" << end() << "] to [" << t.start << "->" << t.end() << "]" );
+  if ( freq != t.freq )
+	throw frequency_mismatch(); 
+
+  if (start == t.start and end() == t.end())
+	{
+	  LOG_TRACE(logger, "equal join");
+	  data = f(data,t.data);
+ 	  return *this;	  
+ 	}
+  
+  if ( t.start > end() or t.end() < start)
+	return join(t);
+
+  if // have overlapping tseries
+	( t.end() > start or     // 111111XXXX222222 Overlapping on the start
+	  t.start < end()    )   // 222222XXXX111111 Overlapping on the end
+	{
+	  tseries r(start,freq); // accumulate the results here
+
+	  tsidx   s(start); // tsidx start of overlapping section (defaults on start of this series)
+	  tsidx   e(end()); // tsidx end   of overlapping section (defaults on end   of this series)
+
+	  if ( t.start < start )  // If incoming series begins before this one
+		{
+		  r._start = t.start;         // Results begins before too
+		  t.extract(r,               // and extract the first part from the incoming series
+					tsidx(t.start),  
+					start-t.start
+					);
+		}
+	  else                    // If incoming series begins after
+		{
+		  // extract from start len t.start-start from this
+		  s = t.start;             // overlapping section begins at incoming section begin
+		  extract(r,               // and extract the first part from this series
+				  tsidx(start),  
+				  t.start-start
+					);
+		  
+		}
+
+	  if (t.end() > end())       // If incoming series ends after this one
+		{
+		                         // extract from end() len t.end()-end() from t
+		  r.join(
+				 t.extract(end(),
+						   t.end()-end()));
+		}
+	  else                       // if this series ends after incoming series 
+		{
+		  r.join(
+				 extract(t.end(),
+						 end()-t.end()));
+		  e = t.end();            // end of overlapping section is at incoming series end
+		}
+
+	  // Now treats the overlapping section
+
+	  // First operand
+	  tseries p(s,freq);
+	  p = extract(s, (e-s));
+	  // cerr << "p>" << p << endl;
+
+	  // Second operand
+	  tseries q(s,freq);
+	  q = t.extract(s, (e-s));
+	  // cerr << "q>" << q << endl;
+
+	  // Result of the operation
+	  p.join(q,f);
+
+	  // Merge in the result
+	  r.merge(p);
+
+	  // Save the result
+	  *this = r;
+	  return *this;
+	}
+  else return join(t); // for non-overlapping tseries 
+}
+
+template <class M,class T> 
+inline 
+tsmat<M,T>&  tsmat<M,T>::join(const tsmat<M,T>& t)
+{
+  // cerr << "joining [" << start << "->" << end() << "] to [" << t.start << "->" << t.end() << "]" << endl;
+
+  // Not overlapping before
+  if ( freq != t.freq )
+	throw frequency_mismatch(); 
+
+  if (t.end() < start) 
+	{
+	  prepend(t);
+	  return *this;
+	}
+
+  if (end() <= t.start)
+	{
+	  append(t);
+	  return *this;
+	}
+
+  throw overlapping();
+  return *this;
+}
+
+template <class M,class T> 
+inline 
+tsmat<M,T>&  tsmat<M,T>::prepend(const tsmat<M,T>& t)
+{
+  LOG_TRACE(logger, "prepend " << t.end() << " to " << start-1 );
+  if ( freq != t.freq )
+	throw frequency_mismatch(); 
+
+  if ( t.end() == start-1 ) // simple case
+	{
+	  data.prepend(t.data); 
+	  _start=t.start;   
+	  return *this;
+	}
+
+  if ( t.end() < start )
+	{
+	  data.prepend_missing((start-t.end()).units(freq));
+	  data.prepend(t.data);
+	  _start=t.start;   
+	  return *this;
+	}
+
+  if ( t.end() >= start )
+	{
+	  throw overlapping();
+	}
+  return *this;
+}
+
+
+// Append t to this
+// end() <= start
+template <class M,class T> 
+inline 
+tsmat<M,T>&  tsmat<M,T>::append(const tsmat<M,T>& t)
+{
+  LOG_TRACE(logger, "append " << t.start << " to " << end() );
+  //  cerr << "append " << t.start << " to " << end() << endl;
+
+  if ( freq != t.freq )
+	throw frequency_mismatch(); // ?!?
+
+  if ( end() == t.start ) // simple case
+	{
+	  //	  cerr << "simple-case" << endl;
+	  data.append(t.data); 
+	  return *this;
+	}
+
+  if ( end() < t.start )
+	{
+	  tsidx_distance d(t.start - end());	  
+	  data.append_missing(d.units(freq));
+	  data.append(t.data);
+	  return *this;
+	}
+
+  if ( end() > t.start )
+	{
+	  throw overlapping();
+	}
+
+  return *this;
+}
+
+template <class M,class T> 
+inline 
+tsmat<M,T>&  tsmat<M,T>::operator <<(const tsmat<M,T>& tin)
+{
+  tsmat<M,T> t=tin;
+  LOG_TRACE(logger, "operator<<()");
+  LOG_TRACE(logger, " 1> S"<< start << " / E" << end() );
+  LOG_TRACE(logger, " 2> S"<< t.start << " / E" << t.end() );
+
+  if ( freq != t.freq )
+	throw frequency_mismatch(); 
+
+  if ( (not compatible_with(t)) 
+	  or (size().second != t.size().second) 
+	   ) 
+	{
+	  LOG_TRACE(logger, "not compatible: " << compatible_with(t));
+	  LOG_TRACE(logger, "or size: " << size().second << " " << t.size().second );
+	  // shall adjust timeseries to use them
+
+	  int n=0,m=0;
+	  
+	  if (t.start != start) 
+		{		  
+		  n=(t.start-start).units(freq);
+		  if (t.start > start) 
+			{
+			  t.data.prepend_missing((t.start-start).units(freq));
+			  t._start = start;
+			}
+		  else
+			{
+			  //			  n=(start-t.start).units(freq);
+			  data.prepend_missing((start-t.start).units(freq));
+			  _start=t.start;
+			}
+		}
+
+	  LOG_TRACE(logger,"N="<<n);
+	  LOG_TRACE(logger,"M="<<m);
+	  LOG_TRACE(logger, " 1>]S"<< start << " / E" << end() );
+	  LOG_TRACE(logger, " 2>]S"<< t.start << " / E" << t.end() );
+
+	  if (end() > t.end()) 
+		{
+		  t.data.append_missing((end()-t.end()).units(freq));
+		}
+	  
+	  if (end() < t.end()) 
+		{
+		  LOG_TRACE(logger,"APP="<<(t.end()-end()).units(freq));
+		  data.append_missing((t.end()-end()).units(freq));
+		}
+
+	  LOG_TRACE(logger, "or size: " << size().second << " " << t.size().second );
+	  LOG_TRACE(logger, " 1>*S"<< start << " / E" << end() );
+	  LOG_TRACE(logger, " 2>*S"<< t.start << " / E" << t.end() );
+	}
+
+  LOG_TRACE(logger, "  data.size()="<< data.size() << " .nobs()=" << data.nobs());
+  data << t.data ;
+  LOG_TRACE(logger, "  data.size()="<< data.size() << " .nobs()=" << data.nobs());
+
+  // Insert names
+  int names_b4 = series.size();
+
+  LOG_TRACE(logger, "  names ()="<< series.size() << " . << ()=" << t.series.size());
+  {
+	vector<string>::iterator i = t.series.begin();
+	for (; i!=t.series.end();++i)
+	  {
+		series.push_back(*i);
+	  }
+  }
+
+  // Insert metadata
+  { 
+	unsigned int j=0;
+	unsigned int i=0;
+	for (;i<t.metadata.size();++i)
+	  {
+		const metadata_val_t& v = t.metadata[i];
+		for (metadata_val_t::const_iterator vi=v.begin();vi!=v.end();vi++)
+		  {
+			LOG_TRACE(logger,"\t"<<vi->first);
+			meta(names_b4+j,vi->first,vi->second);
+		  }
+		j++;
+	  }
+  }
+
+  return *this;
+}
+
+template <class M,class T> 
+inline 
+tsmat<M,T>&  tsmat<M,T>::operator >>(tsmat<M,T>& t)
+{
+  t<<(*this);
+  (*this)=t;
+  return *this;
+}
+
+template <class M,class T> 
+inline 
+bool tsmat<M,T>::compatible_with(const tsmat<M,T>& t)
+{
+  //cerr << "start=" << start << "/" << t.start << endl;
+  //cerr << "freq=" << freq << "/" << t.freq << endl;
+  return ( start==t.start and freq==t.freq );
+}
+
+template <class M,class T> 
+inline 
+pair<size_t,size_t>  tsmat<M,T>::size(void) const
+{ size_t s = (data.size()?data[0].size():0); return make_pair(data.size(), s); } 
+
+template <class M,class T>
+inline
+tsidx tsmat<M,T>::end(void) const
+{ tsidx t(start,freq); t+=size().second; return t;}
+
+template <class M,class T> 
+inline 
+tsmat<M,T>&  tsmat<M,T>::extract(tsmat<M,T>& t,const tsidx& s, const tsidx_distance& dist) const
+{
+  long b = (s-start).units(freq);
+  long e = b+dist.units(freq);
+  // cerr << start  << s << "extracting from " << b << " to " << e << endl;
+  t.data = data;  
+  data.extract(t.data,b,e);
+  // cerr << "extracted " << t.size().first << "x" << t.size().second << " " << t.data.size() << " " << t.data[0].size() << endl;
+  // cerr << t.data << endl;
+  t._start = s;
+  t._start.setFreq(freq);
+  t._freq  = freq;
+  t.metadata = metadata;
+  t.series = series;
+  // cerr << t << endl;;
+  return t;  
+}
+
+template <class M,class T> inline tsmat<M,T>&  tsmat<M,T>::operator  +=(const tsmat<M,T>& t)
+{ join( t, plus<matrix> () ); return *this; }
+
+template <class M,class T> inline tsmat<M,T>&  tsmat<M,T>::operator  -=(const tsmat<M,T>& t)
+{ join( t, minus<matrix> () ); return *this; }
+
+template <class M,class T> inline tsmat<M,T>&  tsmat<M,T>::operator  *=(const tsmat<M,T>& t)
+{ join( t, multiplies<matrix> () ); return *this; }
+
+template <class M,class T> inline tsmat<M,T>&  tsmat<M,T>::operator  /=(const tsmat<M,T>& t)
+{ join( t, divides<matrix> () );    return *this; }
+
+template <class M,class T> inline  void tsmat<M,T>::data_copy(double* D) const
+{
+  data.copy(D);
+}

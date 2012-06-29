@@ -1,0 +1,59 @@
+Name: 			@PACKAGE_NAME@
+Version: 		@VERSION@
+Release: 		1
+Summary:		Eurocoin - Banca d'Italia Time Series in C++
+Epoch:			0
+
+Group: 			Libraries/Scientific
+License: 		GNU GPL
+URL: 			https://github.com/exedre/bits--
+Source: 		%{name}-%{version}-%{release}.tar.gz
+BuildRoot: 		%{_tmppath}/%{name}-%{version}-%{release}-buildroot
+
+%description
+
+C++ Library (.h++) for Time Series
+
+%package devel
+Summary: Project Eurocoin - Banca d'Italia Time Series in C++
+Group: Development/Libraries
+Requires:   %{name} = %{version}-%{release}
+
+%description devel
+Docs EUROCOIN bits++
+
+
+%prep
+%setup -q -n %{name}-%{version}-%{release}
+
+%build
+%configure 
+make
+
+%install
+rm -rf $RPM_BUILD_ROOT
+make prefix=$RPM_BUILD_ROOT/usr  includedir=$RPM_BUILD_ROOT/usr/include libdir=$RPM_BUILD_ROOT/usr/lib install
+find $RPM_BUILD_ROOT -name '*.la' -exec rm -f {} ';'
+
+%clean
+rm -rf $RPM_BUILD_ROOT
+
+%post -p /sbin/ldconfig
+
+%postun -p /sbin/ldconfig
+
+
+%files
+%defattr(-,root,root,-)
+%{_includedir}/%{name}/*
+%doc AUTHORS COPYING INSTALL NEWS README ChangeLog 
+
+%files devel
+%defattr(-,root,root,-)
+%doc %{_docdir}/%{name}/*
+
+
+%changelog
+* Tue Jun 10 2009 Somma Emmanuele <emmanuele_DOT_somma_AT_bancaditalia_DOT_it> - 2.0.0
+- First Import
+

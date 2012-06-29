@@ -1,0 +1,42 @@
+#ifndef _LOG4BITS_H
+#define _LOG4BITS_H
+
+#define LOGGERQUOTE(x) #x
+#define _LOGGERQUOTE(x) LOGGERQUOTE(x)
+#define LOGGERXQUOTE(x) _LOGGERQUOTE(x)
+
+#ifdef LOG4BITS
+
+#include "log4cxx/logger.h"
+#include "log4cxx/basicconfigurator.h"
+#include "log4cxx/propertyconfigurator.h"
+#include "log4cxx/helpers/exception.h"
+
+using namespace log4cxx;
+using namespace log4cxx::helpers;
+
+extern LoggerPtr logger;
+
+#define LOG_INFO(W,M) LOG4CXX_INFO(W,M)
+#define LOG_DEBUG(W,M) LOG4CXX_DEBUG(W,M)
+#define LOG_TRACE(W,M) LOG4CXX_TRACE(W,M)
+#define LOG_WARN(W,M) LOG4CXX_WARN(W,M)
+#define LOG_ERROR(W,M) LOG4CXX_ERROR(W,M)
+
+#define LOGGER4BITS static log4cxx::LoggerPtr logger;
+#define LOGGERDEF(C) template<> LoggerPtr (C::logger)(Logger::getLogger(LOGGERQUOTE(C)));
+#define GETLOGGER(N) this->logger=LoggerPtr(Logger::getLogger(N))
+#else
+
+
+#define LOG_INFO(W,M) 
+#define LOG_DEBUG(W,M) 
+#define LOG_TRACE(W,M) 
+#define LOG_ERROR(W,M) 
+
+#define LOGGER4BITS
+#define LOGGERDEF(C) 
+
+#endif // LOG4BITS
+
+#endif // _LOG4BITS_H

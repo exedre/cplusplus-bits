@@ -1,0 +1,251 @@
+// -*- mode: c++ -*-
+/*
+
+  This file is part of BITS++ -  C++ Banca d'Italia Time Series project
+
+  Copyright (c) 2005-2012 Banca d'Italia - Area Ricerca Economica e
+                          Relazioni Internazionali
+
+  Author: Emmanuele Somma (emmanuele_DOT_somma_AT_bancaditalia_DOT_it)
+          Area Ricerca Economica e Relazioni Internazionali 
+          Banca d'Italia
+		  
+  Any parts of this program derived from this project,
+  or contributed by third-party developers are copyrighted by their
+  respective authors.
+
+  This program is free software; you can redistribute it and/or modify
+  it under the terms of the GNU General Public License as published by
+  the Free Software Foundation; either version 2 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU General Public License for more details.
+
+  You should have received a copy of the GNU General Public License
+  along with this program; if not, write to the Free Software
+  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301, USA
+
+*/
+
+#include <string>
+#include <vector>
+#include <stack>
+#include <map>
+using namespace std;
+
+#define BOOST_SPIRIT_DEBUG 
+#define BOOST_SPIRIT_ASSERT_EXCEPTION
+
+#include <boost/spirit.hpp>
+
+using namespace boost;
+using namespace spirit;
+
+#include "tsmat.h"
+
+inline void bits::tscalc::clear()     
+{ 
+  stk=stack<tseries>() ; 
+}
+
+inline tseries bits::tscalc::answer() 
+{ 
+  return stk.top() ; 
+}
+
+inline tseries bits::tscalc::toppop() 
+{ 
+  tseries a = stk.top() ; 
+  stk.pop() ; 
+  return a ; 
+}
+
+inline void bits::tscalc::PUSH_NUM(const char* b, const char* e) 
+{
+  double d = lexical_cast<double>(string(b,e)) ;
+  LOG_TRACE(logger,"PUSH_NUM " << d);	  
+  tseries t((*in)(0)) ;
+  LOG_TRACE(logger,t);	  
+  t = d ;
+  LOG_TRACE(logger,t);	  
+  stk.push(t) ;
+}
+
+inline  void bits::tscalc::PUSH_VAR(const char* b, const char* e) 
+{ 
+
+  string name(b,e) ;
+
+  if ( in->has_name(name) )
+	{
+	  tseries t((*in)[name]);
+	  stk.push(t); 
+	  return;
+	}
+
+  if ( tnew->has_name(name) )
+	{
+	  tseries t((*tnew)[name]);
+	  stk.push(t); 
+	  return;
+	}
+
+  cerr << "ERROR: IN FORMULA "
+	   << s_name << " THE NAME " 
+	   << name << " DOESN'T EXISTS INTO REPOSITORY."  
+	   << endl;
+
+  throw syntax_error() ;
+}
+
+template<class Functional>
+inline 	  void OP(void) 
+{ 
+  tseries b = bits::tscalc::toppop();
+  tseries a = bits::tscalc::toppop(); 
+  a.join( b, Functional() ); 
+  bits::tscalc::stk.push(a); 
+}
+
+inline 	void bits::tscalc::ADD(const char* , const char* ) { OP<       plus<matrix> >(); }
+inline 	void bits::tscalc::SUB(const char* , const char* ) { OP<      minus<matrix> >(); }
+inline 	void bits::tscalc::MUL(const char* , const char* ) { OP< multiplies<matrix> >(); }
+inline  void bits::tscalc::DIV(const char* , const char* ) { OP<    divides<matrix> >(); }
+
+inline 	void bits::tscalc::LAG1(const char* , const char* ) 
+{ 
+  tseries b = toppop(); 
+  b.lag();
+  stk.push(b);
+}
+ 
+inline  void bits::tscalc::LAG2(const char* , const char* ) 
+{ 
+  tseries b = toppop(); 
+  tseries a = toppop(); 
+  double  n = b.value(b.start,0);
+  a.lag(n);
+  stk.push(a);
+}
+
+inline 	void bits::tscalc::INV(const char* , const char* ) 
+{ 
+  tseries q = toppop();
+  tseries t((*in)(0)) ;
+  t = -1;
+  q *= t;
+  stk.push(q);
+}
+
+inline 	void bits::tscalc::LEAD1(const char* , const char* ) { LAG1(NULL,NULL); }
+
+inline  void bits::tscalc::LEAD2(const char* , const char* ) { INV(NULL,NULL); LAG2(NULL,NULL); }
+
+inline 	void bits::tscalc::NAME(const char* b, const char* e) 
+{
+  s_name = string(b,e);
+}
+
+inline 	void bits::tscalc::ENTRY(const char* b, const char* e) 
+{
+  tseries q = toppop();
+  q.name(0,s_name);
+  if (((tnew->size()).first)==0)
+	(*tnew)  = q;
+  else
+	(*tnew) << q;
+  stk.push(q);
+}
+
+
+inline
+tseries tsparse(tseries t,        // Uses a  temp because we add new vars to it
+				char * buffer)
+{	
+  using namespace bits::tscalc;
+
+  bits::tscalc::in = &t ;
+  tseries t1(t.start,t.freq);
+
+  bits::tscalc::tnew = &t1 ;
+  string name, value ;
+
+  rule<> char_ident_start   = alpha_p | ch_p('_') ;
+  rule<> char_ident_middle  = alnum_p | ch_p('_') ;
+  rule<> ident              = char_ident_start >> * char_ident_middle ;
+  rule<> char_start_comment = ch_p('#') | ch_p(';') | str_p("//") ;
+  rule<> blanks_p           = * blank_p ;
+  rule<> number_p           = real_p ;
+  rule<> value_p            = ident  [&PUSH_VAR]  | number_p  [&PUSH_NUM]  ;
+
+  rule<> expression_p, factor;
+	
+  rule<> group       = '(' >> expression_p >> ')';
+
+  rule<> function    = 
+	str_p("LAG" ) >> '(' >> expression_p >> ch_p(',') >> expression_p [ &LAG2 ] >> ch_p(')') 
+	| str_p("LAG" ) >> '(' >> expression_p [ &LAG1 ]  >> ch_p(')') 
+	| str_p("LEAD") >> '(' >> expression_p >> ch_p(',') >> expression_p [ &LEAD2 ] >> ch_p(')') 
+	| str_p("LEAD" ) >> '(' >> expression_p [ &LEAD1 ]  >> ch_p(')') ;
+
+  factor             = function | '-' >> factor [&INV] | value_p  | group   ;
+  
+  rule<> term        = factor >> *( (  '*' >> factor) [&MUL] 
+									| ('/' >> factor) [&DIV] ) ;
+
+  expression_p       =   term >> *( (  '+' >> term) [&ADD]  
+									| ('-' >> term) [&SUB]  );
+
+  rule<> l_category = 
+	blanks_p  >> 
+	ch_p('[') >> 
+	blanks_p  >> 
+	ident     >>
+	blanks_p  >> 
+	ch_p(']') >> 
+	blanks_p  >> 
+	eol_p
+	;
+	
+  rule<> l_comment      = blanks_p >> char_start_comment >> * print_p >> eol_p ;
+  rule<> l_empty        = blanks_p >> eol_p ; 
+  rule<> c_comment_rule = confix_p("/*", *anychar_p, "*/") ;
+
+  rule<> b_comment = 
+	blanks_p       >> 
+	c_comment_rule >>
+	blanks_p       >> 
+	eol_p
+	; 
+
+  rule<> l_entry =  
+	blanks_p       >>
+	ident [&NAME]  >> 
+	blanks_p       >>
+	ch_p('=')      >> 
+	blanks_p       >>
+	expression_p [&ENTRY] >>
+	blanks_p 	
+	; 
+
+  rule<> ll_entry = ( l_entry % ';' ) >> eol_p ;
+
+  //	rule<> lines = l_comment | b_comment | l_category | ll_entry | l_empty;
+
+  rule<> ini_file =  lexeme_d [ * ll_entry  ] ;
+
+  parse(buffer, ini_file).full ;
+
+  tseries q = toppop() ;
+  while ( stk.size() > 0 )
+	{
+	  tseries q1 = toppop() ;
+	  q1 << q;
+	  q = q1;
+	}
+  q.shrink();
+  return q ;
+}
